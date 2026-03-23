@@ -26,7 +26,7 @@ header h1{font-family:'Orbitron',monospace;font-size:1.4rem;color:#00e5ff;text-s
 #talkBtn{width:100px;height:100px;border-radius:50%;border:3px solid #00e5ff;background:rgba(0,229,255,.08);color:#00e5ff;font-family:'Orbitron',monospace;font-size:.65rem;font-weight:700;letter-spacing:1px;cursor:pointer;position:relative;transition:all .3s;text-transform:uppercase}
 #talkBtn:active,#talkBtn.listening{border-color:#4caf50;color:#4caf50;background:rgba(76,175,80,.15);box-shadow:0 0 30px rgba(76,175,80,.3)}
 #talkBtn.thinking{border-color:#ff9800;color:#ff9800;background:rgba(255,152,0,.1);box-shadow:0 0 30px rgba(255,152,0,.3)}
-#talkBtn.speaking{border-color:#00e5ff;color:#00e5ff;background:rgba(0,229,255,.15);box-shadow:0 0 30px rgba(0,229,255,.4)}
+#talkBtn.speaking{border-color:#ff5252;color:#ff5252;background:rgba(255,82,82,.15);box-shadow:0 0 30px rgba(255,82,82,.4)}
 #talkBtn::before{content:'';position:absolute;inset:-8px;border-radius:50%;border:1px solid rgba(0,229,255,.2);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.1);opacity:0}}
 .settings-btn{position:fixed;top:12px;right:12px;background:none;border:none;color:#555;font-size:1.2rem;cursor:pointer;z-index:10}
@@ -108,6 +108,14 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
 
 function startListening() {
   if (!recognition) return;
+  // If currently speaking, stop speech first
+  if (btn.classList.contains('speaking')) {
+    speechSynthesis.cancel();
+    btn.classList.remove('speaking');
+    btn.textContent = 'TAP TO\nTALK';
+    setStatus('ready');
+    return;
+  }
   if (btn.classList.contains('listening')) {
     recognition.stop();
     btn.classList.remove('listening');
@@ -164,8 +172,10 @@ async function sendToTerry(text) {
 
 
 function speak(text) {
+  btn.textContent = 'TAP TO\nSTOP';
   if (!('speechSynthesis' in window)) {
     setStatus('ready');
+    btn.textContent = 'TAP TO\nTALK';
     return;
   }
   // Clean text for TTS
@@ -185,8 +195,8 @@ function speak(text) {
     u.voice = male || english || voices[0];
   }
   
-  u.onend = () => setStatus('ready');
-  u.onerror = () => setStatus('ready');
+  u.onend = () => { setStatus('ready'); btn.textContent = 'TAP TO\nTALK'; };
+  u.onerror = () => { setStatus('ready'); btn.textContent = 'TAP TO\nTALK'; };
   speechSynthesis.speak(u);
 }
 
