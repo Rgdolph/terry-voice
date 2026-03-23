@@ -61,7 +61,7 @@ header h1{font-family:'Orbitron',monospace;font-size:1.4rem;color:#00e5ff;text-s
 <button id="talkBtn" onclick="startListening()">TAP TO<br>TALK</button>
 </div>
 <script>
-const DEFAULT_RELAY = 'https://parent-timeline-affordable-creative.trycloudflare.com';
+const DEFAULT_RELAY = 'https://projectors-apache-events-hopkins.trycloudflare.com';
 
 let config = {
   relay: localStorage.getItem('terry_relay') || DEFAULT_RELAY,
@@ -110,6 +110,7 @@ function startListening() {
   if (!recognition) return;
   // If currently speaking, stop speech first
   if (btn.classList.contains('speaking')) {
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     speechSynthesis.cancel();
     btn.classList.remove('speaking');
     btn.textContent = 'TAP TO\nTALK';
@@ -171,33 +172,51 @@ async function sendToTerry(text) {
 
 
 
-function speak(text) {
+let currentAudio = null;
+
+async function speak(text) {
   btn.textContent = 'TAP TO\nSTOP';
-  if (!('speechSynthesis' in window)) {
-    setStatus('ready');
-    btn.textContent = 'TAP TO\nTALK';
-    return;
-  }
-  // Clean text for TTS
-  const clean = text.replace(/[*_#`~\[\]]/g, '').replace(/https?:\/\/\S+/g, 'link').substring(0, 500);
-  const u = new SpeechSynthesisUtterance(clean);
-  u.rate = config.rate;
+  btn.classList.add('speaking');
+  setStatus('speaking');
   
-  // Try to find configured voice
-  const voices = speechSynthesis.getVoices();
-  if (config.voice) {
-    const v = voices.find(v => v.name === config.voice);
-    if (v) u.voice = v;
-  } else {
-    // Default: prefer a male English voice
-    const male = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('male'));
-    const english = voices.find(v => v.lang.startsWith('en'));
-    u.voice = male || english || voices[0];
+  try {
+    // Use ElevenLabs TTS via relay
+    const r = await fetch(`${config.relay}/api/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    });
+    
+    if (!r.ok) throw new Error('TTS failed');
+    
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    currentAudio = new Audio(url);
+    
+    currentAudio.onended = () => {
+      setStatus('ready');
+      btn.textContent = 'TAP TO\nTALK';
+      btn.classList.remove('speaking');
+      currentAudio = null;
+      URL.revokeObjectURL(url);
+    };
+    
+    currentAudio.onerror = () => {
+      setStatus('ready');
+      btn.textContent = 'TAP TO\nTALK';
+      btn.classList.remove('speaking');
+      currentAudio = null;
+    };
+    
+    currentAudio.play();
+  } catch(e) {
+    console.error('TTS error:', e);
+    // Fallback to browser TTS
+    const u = new SpeechSynthesisUtterance(text.substring(0, 500));
+    u.onend = () => { setStatus('ready'); btn.textContent = 'TAP TO\nTALK'; btn.classList.remove('speaking'); };
+    u.onerror = () => { setStatus('ready'); btn.textContent = 'TAP TO\nTALK'; btn.classList.remove('speaking'); };
+    speechSynthesis.speak(u);
   }
-  
-  u.onend = () => { setStatus('ready'); btn.textContent = 'TAP TO\nTALK'; };
-  u.onerror = () => { setStatus('ready'); btn.textContent = 'TAP TO\nTALK'; };
-  speechSynthesis.speak(u);
 }
 
 // Settings
