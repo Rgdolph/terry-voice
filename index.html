@@ -44,10 +44,8 @@ header h1{font-family:'Orbitron',monospace;font-size:1.4rem;color:#00e5ff;text-s
 <button class="settings-btn" onclick="toggleSettings()">⚙</button>
 <div class="settings" id="settingsPanel">
 <h2>Settings</h2>
-<label>Telegram Bot Token</label>
-<input id="cfgToken" placeholder="Bot token">
-<label>Chat ID</label>
-<input id="cfgChatId" placeholder="Chat ID">
+<label>Relay Server URL</label>
+<input id="cfgRelay" placeholder="https://your-relay.trycloudflare.com">
 <label>TTS Voice</label>
 <select id="cfgVoice"></select>
 <label>Speech Rate</label>
@@ -63,12 +61,10 @@ header h1{font-family:'Orbitron',monospace;font-size:1.4rem;color:#00e5ff;text-s
 <button id="talkBtn" onclick="startListening()">TAP TO<br>TALK</button>
 </div>
 <script>
-const DEFAULT_TOKEN = '8758938410:AAEKYZBMyFxMAURMK7R5JP_Qr-LrTkYn7q4';
-const DEFAULT_CHAT_ID = '8625775648';
+const DEFAULT_RELAY = 'https://parent-timeline-affordable-creative.trycloudflare.com';
 
 let config = {
-  token: localStorage.getItem('tg_token') || DEFAULT_TOKEN,
-  chatId: localStorage.getItem('tg_chatId') || DEFAULT_CHAT_ID,
+  relay: localStorage.getItem('terry_relay') || DEFAULT_RELAY,
   voice: localStorage.getItem('tts_voice') || '',
   rate: parseFloat(localStorage.getItem('tts_rate') || '1')
 };
@@ -77,8 +73,6 @@ const btn = document.getElementById('talkBtn');
 const statusEl = document.getElementById('status');
 const chatEl = document.getElementById('chat');
 let recognition = null;
-let lastUpdateId = 0;
-
 // Init speech recognition
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -141,73 +135,33 @@ function addMessage(text, sender) {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-// Get current max update_id to ignore old messages
-async function initUpdateId() {
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${config.token}/getUpdates?offset=-1`);
-    const d = await r.json();
-    if (d.ok && d.result.length > 0) {
-      lastUpdateId = d.result[d.result.length - 1].update_id;
-    }
-  } catch(e) { console.error('Init update_id error:', e); }
-}
+
 
 async function sendToTerry(text) {
   try {
-    // Mark current position so we only get NEW responses
-    await initUpdateId();
-    
-    // Send message via Telegram Bot API
-    const sendR = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+    const r = await fetch(`${config.relay}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: config.chatId, text: text })
+      body: JSON.stringify({ message: text })
     });
-    const sendD = await sendR.json();
-    if (!sendD.ok) {
-      addMessage('Failed to send message. Check settings.', 'terry');
+    if (!r.ok) {
+      addMessage('Connection error (' + r.status + '). Check settings.', 'terry');
       setStatus('ready');
       return;
     }
-
-    // Poll for response (Terry will respond via Telegram)
-    const reply = await pollForReply(30000); // 30s timeout
-    if (reply) {
-      addMessage(reply, 'terry');
-      setStatus('speaking');
-      speak(reply);
-    } else {
-      addMessage('No response received. Terry might be busy.', 'terry');
-      setStatus('ready');
-    }
+    const data = await r.json();
+    const reply = data.reply || data.text || data.message || 'No response';
+    addMessage(reply, 'terry');
+    setStatus('speaking');
+    speak(reply);
   } catch(e) {
     console.error('Send error:', e);
-    addMessage('Connection error. Check your settings.', 'terry');
+    addMessage('Cannot reach Terry. Make sure relay is running.', 'terry');
     setStatus('ready');
   }
 }
 
-async function pollForReply(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(`https://api.telegram.org/bot${config.token}/getUpdates?offset=${lastUpdateId + 1}&timeout=5`);
-      const d = await r.json();
-      if (d.ok && d.result.length > 0) {
-        for (const update of d.result) {
-          lastUpdateId = update.update_id;
-          // Look for a message FROM the bot (not from the user)
-          const msg = update.message;
-          if (msg && msg.from && msg.from.is_bot && msg.chat.id.toString() === config.chatId) {
-            return msg.text;
-          }
-        }
-      }
-    } catch(e) { console.error('Poll error:', e); }
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  return null;
-}
+
 
 function speak(text) {
   if (!('speechSynthesis' in window)) {
@@ -241,8 +195,7 @@ function toggleSettings() {
   const p = document.getElementById('settingsPanel');
   p.classList.toggle('open');
   if (p.classList.contains('open')) {
-    document.getElementById('cfgToken').value = config.token;
-    document.getElementById('cfgChatId').value = config.chatId;
+    document.getElementById('cfgRelay').value = config.relay;
     document.getElementById('cfgRate').value = config.rate;
     // Populate voices
     const sel = document.getElementById('cfgVoice');
@@ -258,12 +211,10 @@ function toggleSettings() {
 }
 
 function saveSettings() {
-  config.token = document.getElementById('cfgToken').value;
-  config.chatId = document.getElementById('cfgChatId').value;
+  config.relay = document.getElementById('cfgRelay').value.replace(/\/+$/, '');
   config.voice = document.getElementById('cfgVoice').value;
   config.rate = parseFloat(document.getElementById('cfgRate').value);
-  localStorage.setItem('tg_token', config.token);
-  localStorage.setItem('tg_chatId', config.chatId);
+  localStorage.setItem('terry_relay', config.relay);
   localStorage.setItem('tts_voice', config.voice);
   localStorage.setItem('tts_rate', config.rate);
   document.getElementById('settingsPanel').classList.remove('open');
@@ -281,7 +232,6 @@ document.addEventListener('keydown', e => {
 });
 
 // Init
-initUpdateId();
 </script>
 </body>
 </html>
